@@ -5,7 +5,8 @@ db = SQLAlchemy()
 
 class ClientDevice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    device_id = db.Column(db.String(100), unique=True, nullable=False)
+    device_id = db.Column(db.String(100), unique=True, nullable=False)  # e.g. phone/device unique id
+    wallet_id = db.Column(db.String(100), unique=True, nullable=False)  # permanent wallet id (UUID)
     tokens = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

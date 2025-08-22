@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from models import db, ClientDevice, Payment, Transaction
 import re
+import uuid
 
 # Load environment variables
 load_dotenv()
@@ -29,17 +30,29 @@ with app.app_context():
 rdb = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 CHUNK = 1024 * 64  # 64KB per chunk
 
+
 # -------------------- Regex Parsing --------------------
 def parse_payment_message(msg):
+    """Extract transaction details from Mpesa message"""
     result = {}
-    txn_id_match = re.search(r'([A-Z]{3,}\d+[A-Z\d]*)', msg)
+
+    # Transaction ID (alphanumeric, starts with letters)
+    txn_id_match = re.search(r'\b([A-Z]{2,}[0-9A-Z]+)\b', msg)
     result['transaction_id'] = txn_id_match.group(1) if txn_id_match else None
+
+    # Amount (KshXXX or Ksh XXX)
     amount_match = re.search(r'Ksh\s?([\d,]+(?:\.\d{1,2})?)', msg)
     result['amount'] = float(amount_match.group(1).replace(',', '')) if amount_match else None
+
+    # Phone number (optional)
     phone_match = re.search(r'\b(\d{7,12})\b', msg)
     result['phone'] = phone_match.group(1) if phone_match else None
-    name_match = re.search(r'(?:sent to|from)\s([A-Z][a-zA-Z]+\s[A-Z][a-zA-Z]+)', msg)
+
+    # Name (works for both 'sent to' and 'from')
+    name_match = re.search(r'(?:sent to|from)\s+([A-Z][a-zA-Z]+\s+[A-Z][a-zA-Z]+)', msg)
     result['name'] = name_match.group(1) if name_match else None
+
+    # Date + Time
     date_match = re.search(r'on\s(\d{1,2}/\d{1,2}/\d{2,4})\s+at\s([\d:APM\s]+)', msg)
     if date_match:
         result['date'] = date_match.group(1)
@@ -47,7 +60,9 @@ def parse_payment_message(msg):
     else:
         result['date'] = None
         result['time'] = None
+
     return result
+
 
 # -------------------- File & Video Endpoints --------------------
 def send_with_range(path, mime, download_name):
@@ -99,19 +114,23 @@ def send_with_range(path, mime, download_name):
     resp.headers["Content-Disposition"] = f'attachment; filename="{download_name}"'
     return resp
 
+
 @app.route("/download-apk", methods=["GET", "HEAD"])
 def download_apk():
     path = os.path.join(app.root_path, "static", "apps", "app-release.apk")
     return send_with_range(path, mime="application/vnd.android.package-archive", download_name="app-release.apk")
+
 
 @app.route("/download-icon", methods=["GET", "HEAD"])
 def download_icon():
     path = os.path.join(app.root_path, "static", "apps", "icon.png")
     return send_with_range(path, mime="image/png", download_name="icon.png")
 
+
 @app.route("/", methods=["GET"])
 def index():
     return render_template("apps.html")
+
 
 @app.route("/control", methods=["POST"])
 def control():
@@ -121,6 +140,7 @@ def control():
         return jsonify({"status": "error", "message": "Invalid action"}), 400
     rdb.publish(CHANNEL, action)
     return jsonify({"status": "ok", "sent": action})
+
 
 @app.route("/stream")
 def stream():
@@ -132,23 +152,44 @@ def stream():
                 yield f"data: {message['data']}\n\n"
     return Response(event_stream(), mimetype="text/event-stream")
 
+
 # -------------------- Client Device API --------------------
 @app.route("/client-device", methods=["POST", "GET"])
 def client_device():
     if request.method == "POST":
         data = request.get_json()
         device_id = data.get("device_id")
+
         if not device_id:
             return jsonify({"error": "device_id required"}), 400
+
+        # Check if device already exists
         device = ClientDevice.query.filter_by(device_id=device_id).first()
+
         if not device:
-            device = ClientDevice(device_id=device_id)
+            # Generate new permanent wallet_id
+            wallet_id = str(uuid.uuid4())
+            device = ClientDevice(device_id=device_id, wallet_id=wallet_id)
             db.session.add(device)
             db.session.commit()
-        return jsonify({"id": device.id, "device_id": device.device_id, "tokens": device.tokens})
-    else:
+        else:
+            wallet_id = device.wallet_id  # return existing one
+
+        return jsonify({
+            "id": device.id,
+            "device_id": device.device_id,
+            "wallet_id": wallet_id,
+            "tokens": device.tokens
+        })
+
+    else:  # GET
         devices = ClientDevice.query.all()
-        return jsonify([{"id": d.id, "device_id": d.device_id, "tokens": d.tokens} for d in devices])
+        return jsonify([{
+            "id": d.id,
+            "device_id": d.device_id,
+            "wallet_id": d.wallet_id,
+            "tokens": d.tokens
+        } for d in devices])
 
 @app.route("/client-device/<device_id>/balance", methods=["GET"])
 def check_balance(device_id):
@@ -156,6 +197,7 @@ def check_balance(device_id):
     if not device:
         return jsonify({"error": "Device not found"}), 404
     return jsonify({"device_id": device.device_id, "tokens": device.tokens})
+
 
 # -------------------- Payment API --------------------
 @app.route("/payment", methods=["POST"])
@@ -192,13 +234,23 @@ def add_payment():
     })
     return jsonify(parsed)
 
+
 @app.route("/payment/verify", methods=["POST"])
 def verify_payment():
     data = request.get_json()
     transaction_id = data.get("transaction_id")
     amount_paid = data.get("amount_paid")
 
-    payment = Payment.query.filter_by(transaction_id=transaction_id, amount_paid=amount_paid, status="pending").first()
+    if not transaction_id or not amount_paid:
+        return jsonify({"error": "transaction_id and amount_paid required"}), 400
+
+    # reconciliation (match txn id + amount, regardless of message wording)
+    payment = Payment.query.filter(
+        Payment.transaction_id == transaction_id,
+        Payment.amount_paid == amount_paid,
+        Payment.status == "pending"
+    ).first()
+
     if not payment:
         return jsonify({"error": "No matching pending payment found"}), 404
 
@@ -222,6 +274,7 @@ def verify_payment():
         "tokens_added": tokens,
         "current_tokens": device.tokens
     })
+
 
 # -------------------- Item Purchase --------------------
 @app.route("/transaction/purchase-item", methods=["POST"])
@@ -262,7 +315,6 @@ def list_payments(device_id):
     } for p in payments])
 
 
-
 @app.route("/transaction/<device_id>", methods=["GET"])
 def list_transactions(device_id):
     device = ClientDevice.query.filter_by(device_id=device_id).first()
@@ -276,6 +328,7 @@ def list_transactions(device_id):
         "item": t.item,
         "created_at": t.created_at.isoformat()
     } for t in transactions])
+
 
 # -------------------- Run Server --------------------
 if __name__ == "__main__":
