@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Thumb‑Stick + Direction</title>
+<style>
+  body { display:grid; place-items:center; height:100vh; margin:0;
+         background:#f27b3b; color:#d1d5db; font-family:sans-serif; }
+  #joystick { position:relative; width:220px; height:220px;
+              touch-action:none; user-select:none; }
+  #base  { width:100%; height:100%; border-radius:50%;
+           background:radial-gradient(circle, #FFFFFF 0%, #F8EEE4 100%);
+           box-shadow:0 0 12px #0008 inset; }
+  #stick { position:absolute; top:50%; left:50%; width:70px; height:70px;
+           border-radius:50%; background:#F3B87F;
+           transform:translate(-50%,-50%); transition:transform .1s ease-out; }
+  #readout, #dir {
+    margin-top:1rem; font-size:1.1rem; font-variant-numeric:tabular-nums;
+    letter-spacing:.02em; text-align:center;
+  }
+  #dir { font-size:1.4rem; font-weight:600; color:#facc15; }
+</style>
+
+<div id="joystick">
+  <div id="base"></div>
+  <div id="stick"></div>
+</div>
+<div id="readout">x 0.00  y 0.00</div>
+<div id="dir">center</div>
+
+<script type="module">
+/* ‑‑‑ feel constants ‑‑‑ */
+const DEAD   = 0.06;   // radius to ignore
+const RAMP   = 1.6;    // expo curve
+const SMOOTH = .12;    // s to 63 %
+
+/* ‑‑‑ helpers ‑‑‑ */
+const shell  = document.getElementById('joystick');
+const knob   = document.getElementById('stick');
+const read   = document.getElementById('readout');
+const dirTxt = document.getElementById('dir');
+const radius = shell.clientWidth / 2;
+
+let vx = 0, vy = 0, active = false, pid = null, lastT = performance.now();
+
+shell.addEventListener('pointerdown', e => {
+  if (active) return;
+  active = true; pid = e.pointerId;
+  shell.setPointerCapture(pid);
+  update(e);
+});
+shell.addEventListener('pointermove', e => active && e.pointerId === pid && update(e));
+shell.addEventListener('pointerup',   end);
+shell.addEventListener('pointercancel', end);
+
+function update(e) {
+  const rect = shell.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2,
+        cy = rect.top  + rect.height / 2;
+
+  /* raw coords → normalised */
+  let dx = (e.clientX - cx) / radius,
+      dy = (e.clientY - cy) / radius;
+
+  /* clamp to unit circle */
+  const mag = Math.hypot(dx, dy);
+  if (mag > 1) { dx /= mag; dy /= mag; }
+
+  const [ox, oy] = shape(dx, dy, mag);
+  const {x, y} = smooth(ox, oy);
+
+  vx = x; vy = y;
+  draw(vx, vy);
+
+  read.textContent = `x ${vx.toFixed(2)}  y ${vy.toFixed(2)}`;
+  dirTxt.textContent = mag < DEAD ? 'center' : getDir(vx, vy);
+}
+
+function end(e) {
+  if (!active || e.pointerId !== pid) return;
+  active = false; pid = null;
+  knob.style.transition = 'transform .15s cubic-bezier(.34,1.56,.64,1)';
+  knob.style.transform  = 'translate(-50%, -50%)';
+  vx = vy = 0;
+  read.textContent = 'x 0.00  y 0.00';
+  dirTxt.textContent = 'center';
+}
+
+/* joystick math */
+function shape(x, y, mag) {
+  if (mag < DEAD) return [0, 0];
+  const scaled = (mag - DEAD) / (1 - DEAD),
+        curved = Math.pow(scaled, RAMP);
+  return [(x / mag) * curved, (y / mag) * curved];
+}
+function smooth(x, y) {
+  const dt = (performance.now() - lastT) / 1000; lastT = performance.now();
+  const a = 1 - Math.exp(-dt / SMOOTH);
+  return { x: vx + (x - vx) * a, y: vy + (y - vy) * a };
+}
+
+/* direction classifier (8‑way) */
+function getDir(x, y) {
+  const ang = (Math.atan2(-y, x) * 180 / Math.PI + 360) % 360;
+  if (ang < 22.5 || ang >= 337.5) return 'right';
+  if (ang < 67.5)  return 'top‑right*';
+  if (ang < 112.5) return 'top';
+  if (ang < 157.5) return 'top‑left*';
+  if (ang < 202.5) return 'left';
+  if (ang < 247.5) return 'down‑left*';
+  if (ang < 292.5) return 'down';
+  return 'down‑right*';
+}
+
+/* draw knob */
+function draw(nx, ny) {
+  knob.style.transition = 'none';
+  knob.style.transform =
+    `translate(${nx * radius * 0.8 - 50}%, ${ny * radius * 0.8 - 50}%)`;
+}
+
+/* expose vx,vy if needed elsewhere */
+export { vx, vy };
+</script>

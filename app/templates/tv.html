@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>TV Player</title>
+  <link href="https://vjs.zencdn.net/8.9.0/video-js.css" rel="stylesheet" />
+  <style>
+    body {
+      background-color: #000;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .video-js {
+      width: 90vw;
+      height: 90vh;
+    }
+  </style>
+</head>
+<body>
+
+  <video
+    id="tv-player"
+    class="video-js vjs-default-skin"
+    controls
+    playsinline
+    muted
+    autoplay
+    preload="auto"
+    data-setup='{"fluid": true, "muted": true, "autoplay": true}'
+  >
+    <source id="videoSource" type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+
+  <script src="https://vjs.zencdn.net/8.9.0/video.min.js"></script>
+  <script>
+    const LAN_IP = "172.23.0.3/"; // change to your server’s LAN IP
+    const MEDIA_IP = "172.23.0.2"
+    const PRESIGNED_PATH = "/media/Foundation%20%E2%80%94%20Brother%20Dawn%20in%20the%20Airlock%20_%20Season%203%20Scene%20_%20Apple%20TV%2B.mp4?AWSAccessKeyId=minioadmin&Signature=ikgc3UP4qBlmLM7jRW8SMjkQIOo%3D&Expires=1755718562";
+    document.getElementById("videoSource").src = `http://${MEDIA_IP}:9000${PRESIGNED_PATH}`;
+
+    const player = videojs('tv-player');
+    const source = new EventSource(`http://${LAN_IP}:5000/stream`);
+
+    source.onmessage = ({ data: cmd }) => {
+      console.log("📡 Command:", cmd);
+      switch (cmd) {
+        case 'play':
+          player.play().catch(err => {
+            player.muted(true);
+            player.play();
+          });
+          break;
+        case 'pause':
+          player.pause();
+          break;
+        case 'forward':
+          player.currentTime(player.currentTime() + 10);
+          break;
+        case 'reverse':
+          player.currentTime(Math.max(0, player.currentTime() - 10));
+          break;
+      }
+    };
+  </script>
+</body>
+</html>

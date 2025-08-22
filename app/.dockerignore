@@ -1,0 +1,5 @@
+repo_media
+content_data
+*.log
+
+venv

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Download APK</title>
+<style>
+    body {
+        background-color: #111;
+        color: white;
+        font-family: sans-serif;
+        text-align: center;
+        margin: 0;
+        padding: 0;
+    }
+    .container {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+    }
+    img.icon {
+        width: 150px;
+        height: 150px;
+        margin-bottom: 20px;
+    }
+    a.download-btn {
+        display: inline-block;
+        background: #28a745;
+        color: white;
+        padding: 15px 30px;
+        font-size: 20px;
+        border-radius: 8px;
+        text-decoration: none;
+    }
+    a.download-btn:hover {
+        background: #218838;
+    }
+    .qr {
+        margin-top: 30px;
+    }
+</style>
+</head>
+<body>
+<div class="container">
+    <img src="https://cdn-icons-png.flaticon.com/512/888/888839.png" alt="APK Icon" class="icon">
+    <a class="download-btn" href="/download-apk">Download App</a>
+    <br>
+    <br>
+    <a class="download-btn" href="/download-icon">Download Icon</a>
+
+    <div class="qr">
+        <p>Scan to download:</p>
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=http://192.168.0.105:5000/download-apk" alt="QR Code">
+    </div>
+</div>
+</body>
+</html>
